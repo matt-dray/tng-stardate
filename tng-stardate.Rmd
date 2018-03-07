@@ -1,0 +1,224 @@
+---
+title: "R Trek"
+subtitle: "Extracting and exploring Star Trek star dates with R"
+author: "Matt Dray & Adriana De Palma"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, message = FALSE)
+library(emo)
+```
+
+`r emo::ji('star')`
+`r emo::ji('date')`
+`r emo::ji('page_with_curl')`
+`r emo::ji("point_right")`
+`r emo::ji("open_book")`
+`r emo::ji("man_facepalming")`
+`r emo::ji("vulcan_salute")`
+`r emo::ji("nerd_face")`
+
+***
+
+# Captain’s log
+
+>Star date 71646.6[^1]. Our mission is to use [R statistical software]() to extract star dates from the scripts of *Star Trek: The Next Generation* and observe their progression over the course of the show’s seven seasons. There appears to be some mismatch in the frequency of digits after the decimal point – could this indicate poor abillity to choose random numbers? Or something more sinister? We shall venture deep into uncharted territory for answers...
+
+# Make it so
+
+# Energise
+
+```{r packages}
+library(readr)  # read text files
+library(purrr)  # iterate function over files
+library(stringr)  # manipulate strings
+library(dplyr)  # data manipulation and pipe opeartor (%>%)
+library(ggplot2)  # plotting
+```
+
+# Lieutenant Commander Data
+
+```{r read}
+scripts <- purrr::map(
+  list.files(
+    "data/scripts",
+    full.names = TRUE
+    ),
+  read_lines # read the content
+  )
+```
+
+
+# Engage! 
+
+```{r prep-data}
+stardates <- stringr::str_extract_all(
+  scripts,
+  pattern = "date[:space:][[:digit:]\\.[:digit:]]{7}"
+) %>% 
+  tibble::enframe() %>% 
+  tidyr::unnest() %>% 
+  dplyr::transmute(
+    episode = name,
+    stardate = stringr::str_replace(
+      string = value,
+      pattern = "date ",
+      replacement = ""
+    )
+  ) %>% 
+  dplyr::mutate(
+    season = as.character(
+      case_when(
+        episode %in% 1:25 ~ "1",
+        episode %in% 26:47 ~ "2",
+        episode %in% 48:73 ~ "3",
+        episode %in% 74:99 ~ "4",
+        episode %in% 100:125 ~ "5",
+        episode %in% 126:151 ~ "6",
+        episode %in% 152:176 ~ "7"
+      )
+    ),
+    stardate = as.numeric(
+      ifelse(
+        test = stardate %in% c("41148..", "40052..", "37650.."),
+        yes = "NA",
+        no = stardate
+      )
+    )
+  ) %>% 
+  dplyr::filter(!is.na(stardate))
+
+glimpse(stardates)
+```
+
+# On screen!
+
+```{r dotplot}
+library(ggsci)
+library(ggthemes)
+
+dotplot_stardate <- stardates %>% 
+  ggplot2::ggplot() +
+  geom_point(aes(x = episode, y = stardate, color = season)) +
+  labs(main = "Episodes are pretty much chronological") +
+  theme_solarized_2(light = FALSE) + 
+  scale_color_startrek()
+
+plotly::ggplotly(dotplot_stardate, tooltip = c("stardate", "episode", "season"))
+```
+
+
+# Decimals
+
+Extract them.
+
+```{r }
+stardates <- stardates %>% 
+  mutate(
+    stardate_decimal = as.numeric(
+      str_sub(
+        as.character(stardate),
+        7,
+        7
+      )
+    ),
+    stardate_decimal = ifelse(
+      is.na(stardate_decimal),
+      0,
+      stardate_decimal
+    )
+  ) %>% 
+  select(season, episode, stardate, stardate_decimal)
+```
+
+Datatable of them.
+
+```{r datatable}
+library(DT)
+
+stardates %>% 
+  mutate(season = as.factor(season)) %>% 
+  DT::datatable(
+    filter = "top",
+    extensions = 'Buttons',
+      options = list(
+        autoWidth = TRUE,  # column width consistent when making selections
+        dom = "Blfrtip",
+        buttons = 
+          list("copy", list(
+            extend = "collection",
+            buttons = c("csv", "excel", "pdf"),
+            text = "Download"
+          ) 
+          ),
+        # customize the length menu
+        lengthMenu = list(
+          c(10, 25, 50, -1), # declare values
+          c(10, 25, 50, "All") # declare titles
+        ), # end of lengthMenu customization
+        pageLength = 10
+      )
+    )
+```
+
+Do a baarplot.
+
+```{r barplot}
+stardates %>% 
+  ggplot2::ggplot() +
+  geom_bar(aes(as.character(stardate_decimal)), fill = "#CC0C00FF") +
+  labs(
+    main = "Stardates end",
+    x = "stardate decimal value"
+  ) +
+  theme_dark() +
+  theme_solarized_2(light = FALSE)
+```
+
+# Belay that
+
+```{r barplot_facet}
+stardates %>% 
+  ggplot2::ggplot() +
+  geom_bar(
+    aes(as.character(stardate_decimal)),
+    fill= c(
+      rep("#CC0C00FF", 10),
+      rep("#5C88DAFF", 9),
+      rep("#84BD00FF", 10),
+      rep("#FFCD00FF", 9),
+      rep("#7C878EFF", 10),
+      rep("#00B5E2FF", 8),
+      rep("#00AF66FF", 8)
+    )
+  ) +
+  labs(x = "stardate decimal value") +
+  facet_wrap(~ season) +
+  theme_solarized_2(light = FALSE) + 
+  scale_color_startrek()
+```
+
+# Links
+
+* Memory Alpha: http://memory-alpha.wikia.com/wiki/Stardate?title=Stardate
+* Starchive: http://starchive.cs.umanitoba.ca/?stardates/
+* Universal stardate converter: http://rinsanity.weebly.com/stardate-converter.html
+* If you actually care about stardates, you can look here: http://trekguide.com/Stardates.htm
+* Mentalfloss simplified guide: http://mentalfloss.com/article/68741/how-do-star-trek-stardates-work
+* List of episodes: https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes
+
+# R information
+
+```{r}
+sessionInfo()
+```
+
+[^1]: The star date for today's date (7 March 2018) as calculated using the [trekguide.com method](http://trekguide.com/Stardates.htm)
