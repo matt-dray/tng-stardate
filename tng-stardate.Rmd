@@ -30,40 +30,77 @@ library(emo)
 
 # Captain’s log
 
->Star date 71646.6[^1]. Our mission is to use [R statistical software]() to extract star dates from the scripts of *Star Trek: The Next Generation* and observe their progression over the course of the show’s seven seasons. There appears to be some mismatch in the frequency of digits after the decimal point – could this indicate poor abillity to choose random numbers? Or something more sinister? We shall venture deep into uncharted territory for answers...
+>Star date 71676.3[^1]. Our mission is to use [R statistical software]() to extract star dates mentioned in the captain's log from the scripts of *Star Trek: The Next Generation* and observe their progression over the course of the show’s seven seasons. There appears to be some mismatch in the frequency of digits after the decimal point – could this indicate poor abillity to choose random numbers? Or something more sinister? We shall venture deep into uncharted territory for answers...
 
-# Make it so
+# Make it so!
 
-# Energise
+Download all the scripts from [Star Trek: The Next Generation](https://en.wikipedia.org/wiki/Star_Trek:_The_Next_Generation) from the [Star Trek Minutiae](http://www.st-minutiae.com/resources/scripts/#thenextgeneration) website. This is provided as a zipped folder containing 276 text files numbered consecutively from 102 to 277.
+
+# Energise!
+
+Ready the workspace by loading the packages we'll need for data manipulation.
 
 ```{r packages}
-library(readr)  # read text files
-library(purrr)  # iterate function over files
+library(readr)  # read files
+library(purrr)  # iterate functions over files
 library(stringr)  # manipulate strings
 library(dplyr)  # data manipulation and pipe opeartor (%>%)
-library(ggplot2)  # plotting
 ```
 
 # Lieutenant Commander Data
 
+We're going to extract the content of the the text files using the `read_lines()` function from the `readr` package. We'll iterate over each file with the `map()` function from the `purrr` package to read them into a list object where each element is a script.
+
 ```{r read}
 scripts <- purrr::map(
-  list.files(
-    "data/scripts",
-    full.names = TRUE
+  list.files(  # create vector of filepath strings to each file
+    "data/scripts",  # file location of the text files 
+    full.names = TRUE  # e.g. "data/scripts/102.txt"
     ),
-  read_lines # read the content
+  readr::read_lines # read the content from each filepath
   )
 ```
 
+We can take a look at some example lines (`[17:34]`) from the title page of the first script (element `[[1]]`).
+
+```{r }
+scripts[[1]][17:34]
+```
+
+Our first example of a star date is in the Captain's log voiceover in lines 46 to 50 of the first script.
+
+```{r }
+scripts[[1]][46:50]
+```
 
 # Engage! 
 
-```{r prep-data}
-stardates <- stringr::str_extract_all(
-  scripts,
-  pattern = "date[:space:][[:digit:]\\.[:digit:]]{7}"
-) %>% 
+We want to extract stardate strings from each script. These are in the form XXXXX.X, where 'X' is a digit. We want to capture the stardates mentioned as part of the captain's log voiceover where possible, so we can start our search pattern with 'date'. This will help us avoid matching to strings that have a stardate-like pattern but aren't stardates
+
+We can extract these with `str_extract_all()` from the `stringr` package, using a [regex](https://github.com/zeeshanu/learn-regex/blob/master/README.md) (regular expression). Our regex is written `date[:space:][[:digit:]\\.[:digit:]]{7}`. This means 'find a string that starts with the word date followed by a space (`date `), which is followed by a string that contains digits (`[:digit:]`) with a period (`\\.`) inside, with a total length of seven characters (`{7}`)'.
+
+This will provide a list object where each element contains the regex-matched string for a script.
+
+```{r extract-stardate}
+stardate_extract <- stringr::str_extract_all(
+  scripts,  # location from which to extract
+  pattern = "date[:space:][[:digit:]\\.[:digit:]]{7}"  # regex
+)
+
+head(stardate_extract)  # see the first few list elements
+```
+
+We're now going to tody the data to:
+
+* turn the list into a dataframe (`tibble::enframe()`) with one row per episode
+* turn this into a dataframe with one row per stardate (`tidyr::unnest()`)
+* rename the columns 'episode' and 'stardate' (`dplyr::transmute()`) and remove the instances of the string 'date ' (`stringr::str_replace()`)
+* create a season column that manually applies the season number to each row depending on its episode number (`dplyr::mutate(case_when())`)
+* remove strings not in the form XXXXX.X (`dplyr::if_else()`)
+* remove any NAs (`dplyr::filter()`)
+
+```{r tidy}
+stardate_tidy <- stardate_extract %>% 
   tibble::enframe() %>% 
   tidyr::unnest() %>% 
   dplyr::transmute(
@@ -87,41 +124,49 @@ stardates <- stringr::str_extract_all(
       )
     ),
     stardate = as.numeric(
-      ifelse(
-        test = stardate %in% c("41148..", "40052..", "37650.."),
-        yes = "NA",
-        no = stardate
+      dplyr::if_else(
+        condition = stardate %in% c("41148..", "40052..", "37650.."),
+        true = "NA",
+        false = stardate
       )
     )
   ) %>% 
   dplyr::filter(!is.na(stardate))
 
-glimpse(stardates)
+glimpse(stardate_tidy)
 ```
 
 # On screen!
 
+Let's visualise the stardates by episode. 
+
+We can make this interactive using plot
+
+We can use the theme
+
 ```{r dotplot}
+library(ggplot2)
+library(plotly)
 library(ggsci)
 library(ggthemes)
 
-dotplot_stardate <- stardates %>% 
+stardate_dotplot <- stardate_tidy %>% 
   ggplot2::ggplot() +
   geom_point(aes(x = episode, y = stardate, color = season)) +
-  labs(main = "Episodes are pretty much chronological") +
+  labs(title = "Stardates are almost (but not quite) chronological") +
   theme_solarized_2(light = FALSE) + 
   scale_color_startrek()
 
-plotly::ggplotly(dotplot_stardate, tooltip = c("stardate", "episode", "season"))
+plotly::ggplotly(stardate_dotplot)
 ```
 
 
-# Decimals
+# Enhance
 
 Extract them.
 
 ```{r }
-stardates <- stardates %>% 
+stardate_tidy_decimal <- stardate_tidy %>% 
   mutate(
     stardate_decimal = as.numeric(
       str_sub(
@@ -144,7 +189,7 @@ Datatable of them.
 ```{r datatable}
 library(DT)
 
-stardates %>% 
+stardate_tidy_decimal %>% 
   mutate(season = as.factor(season)) %>% 
   DT::datatable(
     filter = "top",
@@ -169,14 +214,14 @@ stardates %>%
     )
 ```
 
-Do a baarplot.
+Do a barplot.
 
 ```{r barplot}
-stardates %>% 
+stardate_tidy_decimal %>% 
   ggplot2::ggplot() +
   geom_bar(aes(as.character(stardate_decimal)), fill = "#CC0C00FF") +
   labs(
-    main = "Stardates end",
+   title = "Decimals one to three are most frequent and zero the least frequent",
     x = "stardate decimal value"
   ) +
   theme_dark() +
@@ -186,7 +231,7 @@ stardates %>%
 # Belay that
 
 ```{r barplot_facet}
-stardates %>% 
+stardate_tidy_decimal %>% 
   ggplot2::ggplot() +
   geom_bar(
     aes(as.character(stardate_decimal)),
@@ -200,11 +245,16 @@ stardates %>%
       rep("#00AF66FF", 8)
     )
   ) +
-  labs(x = "stardate decimal value") +
+  labs(
+    title = "There's a similar(ish) pattern of decimal stardate frequency across seasons",
+    x = "stardate decimal value"
+  ) +
   facet_wrap(~ season) +
   theme_solarized_2(light = FALSE) + 
   scale_color_startrek()
 ```
+
+# Speculate!
 
 # Links
 
