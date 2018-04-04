@@ -90,7 +90,7 @@ stardate_extract <- stringr::str_extract_all(
 head(stardate_extract)  # see the first few list elements
 ```
 
-We're now going to tody the data to:
+We're now going to tidy the data to:
 
 * turn the list into a dataframe (`tibble::enframe()`) with one row per episode
 * turn this into a dataframe with one row per stardate (`tidyr::unnest()`)
@@ -136,6 +136,44 @@ stardate_tidy <- stardate_extract %>%
 glimpse(stardate_tidy)
 ```
 
+
+# Scrape episode names [IN DEV]
+
+```{r scrape_ep_names}
+library(rvest)
+library(dplyr)
+
+# Store web url
+tng_ep_wiki <- rvest::html(
+  "https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes"
+  )
+
+#
+tng_ep_names <- tng_ep_wiki %>%
+  rvest::html_nodes(".wikiepisodetable tr > :nth-child(3)") %>%
+  rvest::html_text() %>% 
+  dplyr::tibble() %>% 
+  rename(episode_title = ".") %>% 
+  filter(episode_title != "Title") %>% 
+  mutate(episode = row_number())
+
+tng_ep_names
+```
+
+Now join these episode names to the stardate dataframe.
+
+```{r}
+stardate_tidy_names <- left_join(
+  x = stardate_tidy,
+  y = tng_ep_names,
+  by = "episode"
+) %>% 
+  select(season, episode, episode_title, stardate)
+
+stardate_tidy_names
+```
+
+
 # On screen!
 
 Let's visualise the stardates by episode. 
@@ -150,23 +188,32 @@ library(plotly)
 library(ggsci)
 library(ggthemes)
 
-stardate_dotplot <- stardate_tidy %>% 
+stardate_dotplot <- stardate_tidy_names %>% 
   ggplot2::ggplot() +
-  geom_point(aes(x = episode, y = stardate, color = season)) +
+  geom_point(
+    aes(
+      x = episode,
+      y = stardate,
+      color = season,
+      label = episode_title
+    )
+  ) +
   labs(title = "Stardates are almost (but not quite) chronological") +
   theme_solarized_2(light = FALSE) + 
   scale_color_startrek()
 
-plotly::ggplotly(stardate_dotplot)
+stardate_dotplot %>% 
+  plotly::ggplotly() %>% 
+  layout(margin = list(l = 75))
 ```
 
 
-# Enhance
+# Enhance!
 
 Extract them.
 
 ```{r }
-stardate_tidy_decimal <- stardate_tidy %>% 
+stardate_tidy_decimal <- stardate_tidy_names %>% 
   mutate(
     stardate_decimal = as.numeric(
       str_sub(
@@ -180,8 +227,7 @@ stardate_tidy_decimal <- stardate_tidy %>%
       0,
       stardate_decimal
     )
-  ) %>% 
-  select(season, episode, stardate, stardate_decimal)
+  )
 ```
 
 Datatable of them.
@@ -228,7 +274,7 @@ stardate_tidy_decimal %>%
   theme_solarized_2(light = FALSE)
 ```
 
-# Belay that
+# Belay that!
 
 ```{r barplot_facet}
 stardate_tidy_decimal %>% 
@@ -256,7 +302,7 @@ stardate_tidy_decimal %>%
 
 # Speculate!
 
-# Links
+# Open channel!
 
 * Memory Alpha: http://memory-alpha.wikia.com/wiki/Stardate?title=Stardate
 * Starchive: http://starchive.cs.umanitoba.ca/?stardates/
@@ -265,7 +311,13 @@ stardate_tidy_decimal %>%
 * Mentalfloss simplified guide: http://mentalfloss.com/article/68741/how-do-star-trek-stardates-work
 * List of episodes: https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes
 
-# R information
+# Supplemental
+
+```{r}
+sessionInfo()
+```
+
+# Full stop!
 
 ```{r}
 sessionInfo()
