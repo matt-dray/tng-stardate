@@ -32,9 +32,15 @@ library(emo)
 
 >Star date 71676.3[^1]. Our mission is to use [R statistical software]() to extract star dates mentioned in the captain's log from the scripts of *Star Trek: The Next Generation* and observe their progression over the course of the show’s seven seasons. There appears to be some mismatch in the frequency of digits after the decimal point – could this indicate poor abillity to choose random numbers? Or something more sinister? We shall venture deep into uncharted territory for answers...
 
+We're going to:
+
+* iterative over text files -- containing *Star Trek: The Next Generation scripts* -- to extract stardates using the `purrr` and `stringr` packages
+* web scrape episode names using the `rvest` package
+* tabulate and plot these interactively with `ggplot2`, `plotly` and `DT`
+
 # Make it so!
 
-Download all the scripts from [Star Trek: The Next Generation](https://en.wikipedia.org/wiki/Star_Trek:_The_Next_Generation) from the [Star Trek Minutiae](http://www.st-minutiae.com/resources/scripts/#thenextgeneration) website. This is provided as a zipped folder containing 276 text files numbered consecutively from 102 to 277.
+Start by downloading all the [Star Trek: The Next Generation](https://en.wikipedia.org/wiki/Star_Trek:_The_Next_Generation) scripts from the [Star Trek Minutiae](http://www.st-minutiae.com/resources/scripts/#thenextgeneration) website. These are provided in a zipped folder with 176 text files -- one for each episode.
 
 # Energise!
 
@@ -75,14 +81,14 @@ scripts[[1]][46:50]
 
 # Engage! 
 
-We want to extract stardate strings from each script. These are in the form XXXXX.X, where 'X' is a digit. We want to capture the stardates mentioned as part of the captain's log voiceover where possible, so we can start our search pattern with 'date'. This will help us avoid matching to strings that have a stardate-like pattern but aren't stardates
+We want to extract stardate strings from each script as delivered in the captain's voiceover. As you can see above, the stardates are given in the form 'captiain's log, stardate XXXXX.X', where each X is a digit. We can start our search pattern with 'date' to help us avoid matching to strings that have a stardate-like pattern but aren't stardates.
 
 We can extract these with `str_extract_all()` from the `stringr` package, using a [regex](https://github.com/zeeshanu/learn-regex/blob/master/README.md) (regular expression). Our regex is written `date[:space:][[:digit:]\\.[:digit:]]{7}`. This means 'find a string that starts with the word date followed by a space (`date `), which is followed by a string that contains digits (`[:digit:]`) with a period (`\\.`) inside, with a total length of seven characters (`{7}`)'.
 
 This will provide a list object where each element contains the regex-matched string for a script.
 
 ```{r extract-stardate}
-stardate_extract <- stringr::str_extract_all(
+stardate_extract <- stringr::str_extract_all(  # extract all instances
   scripts,  # location from which to extract
   pattern = "date[:space:][[:digit:]\\.[:digit:]]{7}"  # regex
 )
@@ -95,8 +101,9 @@ We're now going to tidy the data to:
 * turn the list into a dataframe (`tibble::enframe()`) with one row per episode
 * turn this into a dataframe with one row per stardate (`tidyr::unnest()`)
 * rename the columns 'episode' and 'stardate' (`dplyr::transmute()`) and remove the instances of the string 'date ' (`stringr::str_replace()`)
-* create a season column that manually applies the season number to each row depending on its episode number (`dplyr::mutate(case_when())`)
-* remove strings not in the form XXXXX.X (`dplyr::if_else()`)
+* create a season column that manually applies the season number to each row depending on its episode number (`dplyr::mutate(dplyr::case_when())`)
+* remove strings not in the form XXXXX.X (`dplyr::mutate(dplyr::if_else())`)
+* extract the digit after the decimal place in the stardate
 * remove any NAs (`dplyr::filter()`)
 
 ```{r tidy}
@@ -113,7 +120,7 @@ stardate_tidy <- stardate_extract %>%
   ) %>% 
   dplyr::mutate(
     season = as.character(
-      case_when(
+      dplyr::case_when(
         episode %in% 1:25 ~ "1",
         episode %in% 26:47 ~ "2",
         episode %in% 48:73 ~ "3",
@@ -129,92 +136,7 @@ stardate_tidy <- stardate_extract %>%
         true = "NA",
         false = stardate
       )
-    )
-  ) %>% 
-  dplyr::filter(!is.na(stardate))
-
-glimpse(stardate_tidy)
-```
-
-
-# Scrape episode names [IN DEV]
-
-```{r scrape_ep_names}
-library(rvest)
-library(dplyr)
-
-# Store web url
-tng_ep_wiki <- rvest::html(
-  "https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes"
-  )
-
-#
-tng_ep_names <- tng_ep_wiki %>%
-  rvest::html_nodes(".wikiepisodetable tr > :nth-child(3)") %>%
-  rvest::html_text() %>% 
-  dplyr::tibble() %>% 
-  rename(episode_title = ".") %>% 
-  filter(episode_title != "Title") %>% 
-  mutate(episode = row_number())
-
-tng_ep_names
-```
-
-Now join these episode names to the stardate dataframe.
-
-```{r}
-stardate_tidy_names <- left_join(
-  x = stardate_tidy,
-  y = tng_ep_names,
-  by = "episode"
-) %>% 
-  select(season, episode, episode_title, stardate)
-
-stardate_tidy_names
-```
-
-
-# On screen!
-
-Let's visualise the stardates by episode. 
-
-We can make this interactive using plot
-
-We can use the theme
-
-```{r dotplot}
-library(ggplot2)
-library(plotly)
-library(ggsci)
-library(ggthemes)
-
-stardate_dotplot <- stardate_tidy_names %>% 
-  ggplot2::ggplot() +
-  geom_point(
-    aes(
-      x = episode,
-      y = stardate,
-      color = season,
-      label = episode_title
-    )
-  ) +
-  labs(title = "Stardates are almost (but not quite) chronological") +
-  theme_solarized_2(light = FALSE) + 
-  scale_color_startrek()
-
-stardate_dotplot %>% 
-  plotly::ggplotly() %>% 
-  layout(margin = list(l = 75))
-```
-
-
-# Enhance!
-
-Extract them.
-
-```{r }
-stardate_tidy_decimal <- stardate_tidy_names %>% 
-  mutate(
+    ),
     stardate_decimal = as.numeric(
       str_sub(
         as.character(stardate),
@@ -227,16 +149,63 @@ stardate_tidy_decimal <- stardate_tidy_names %>%
       0,
       stardate_decimal
     )
-  )
+  ) %>% 
+  dplyr::filter(!is.na(stardate))
+
+dplyr::glimpse(stardate_tidy)
 ```
 
-Datatable of them.
+# Prepare a scanner probe
+
+So we have the season and episode numbers, but we don't have the episode names. We could extract these from the scripts using regex as well, but another option is simply to scrape them from the [Wikipedia page](https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes) that gives episode information for *The Next Generation*. If ou visit that link, you'll notice that the table sof episodes actually give a stardate, but they only provide one per episode -- our script-scraping shows that many episodes have mulitple instances of stardates and voiceovers by the captain.
+
+We can use the `rvest` package to perform the scrape. This works by supplying a website address and the path of the thing we want to extract -- the episode name column of tables on the Wikipedia page. I used [SelectorGadget] -- a point-and-click tool for finding the CSS selectors for elements of webpages -- for this column in each of the tables on the Wikipedia page (`.wikiepisodetable tr > :nth-child(3)`).
+
+```{r scrape_ep_names}
+library(rvest)
+
+# Store website address
+tng_ep_wiki <- rvest::html(
+  "https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes"
+  )
+
+# extract and tidy
+tng_ep_names <- tng_ep_wiki %>%  # website address
+  rvest::html_nodes(
+    ".wikiepisodetable tr > :nth-child(3)"  # episode name column
+  ) %>%
+  rvest::html_text() %>%  # extract text
+  dplyr::tibble() %>%  # to dataframe
+  rename(episode_title = ".") %>%  # sensible column name
+  dplyr::filter(episode_title != "Title") %>%  # remove table headers
+  dplyr::mutate(episode = row_number())  # episode number (join key)
+
+tng_ep_names
+```
+
+So now we can join the episode names to the dataframe generated from the scripts. This gives us a table with a row per stardate extracted, with its associated season, episode number and episode name.
+
+```{r}
+stardate_tidy_names <- left_join(
+  x = stardate_tidy,
+  y = tng_ep_names,
+  by = "episode"
+) %>% 
+  select(season, episode, episode_title, stardate, stardate_decimal)
+
+stardate_tidy_names
+```
+
+We can make these data into an interactive table with the `DT::datatable` [htmlwidget](https://www.htmlwidgets.org/). The output table can be searched (search box in upper right) and filtered (filters under each column) and the data copied or downloaded (CSV, Excel or PDF) using the buttons in the upper left of the table. You can choose to show 10, 25, 50 or all the rows with the 'show x entries' dropdown.
 
 ```{r datatable}
 library(DT)
 
-stardate_tidy_decimal %>% 
-  mutate(season = as.factor(season)) %>% 
+stardate_tidy_names %>% 
+  mutate(
+    season = as.factor(season),
+    episode_title = as.factor(episode_title)
+    ) %>% 
   DT::datatable(
     filter = "top",
     extensions = 'Buttons',
@@ -260,24 +229,82 @@ stardate_tidy_decimal %>%
     )
 ```
 
+# On screen!
+
+Let's visualise the stardates by episode. 
+
+We can make this interactive using the `plotly` package -- another htmlwidget for R -- that conveneniently has teh funciton `plotly::ggplotly` that can turn a `ggplot` object into an interactive plot. You can hover over each point to find out more information about it.
+
+Of course, there's a package called [`ggsci`](https://github.com/road2stat/ggsci) that contains a discrete colour scale based on the colours of the shirts of the crew in teh first *Star Trek* series. Obviously we'll use that here.
+
+```{r dotplot}
+library(ggplot2)  # basic plotting
+library(plotly)  # make plot interactive
+library(ggsci)  # star trek colour scale
+library(ggthemes)  # dark plot theme
+
+# create basic plot
+stardate_dotplot <- stardate_tidy_names %>% 
+  ggplot2::ggplot() +
+  geom_point(
+    aes(
+      x = episode,
+      y = stardate,
+      color = season,
+      label = episode_title
+    )
+  ) +
+  labs(title = "Stardates are almost (but not quite) chronological") +
+  theme_solarized_2(light = FALSE) + 
+  ggsci::scale_color_startrek()
+
+# make plot interactive
+stardate_dotplot %>% 
+  plotly::ggplotly() %>% 
+  layout(margin = list(l = 75))
+```
+
+So there was some nonlinearity between episodes of the first and second series and at the beginning of the third, but episodes become more chronological from that point onward.
+
+Three points seem to be anomalous with stardates well before the present time period of the episode. Without spoiling them (too much), we can see that each of these episodes takes place in, or references, the past.
+
+*Identity Crisis* (season 4, episode 91, stardate 40164.7) takes place partly in the past:
+
+```{r}
+scripts[[91]][127:129]
+```
+
+*Dark Page* (season 7, episode 158, stardate 30620.1) has a scene involving a diary:
+
+```{r}
+scripts[[158]][2219:2235]
+```
+
+*All Good Things* (season 7, epiosde 176, stardate 41153.7) involves some time travel for Captain Picard:
+
+```{r}
+scripts[[176]][1561:1569]
+```
+
+# Enhance!
+
 Do a barplot.
 
 ```{r barplot}
-stardate_tidy_decimal %>% 
+stardate_tidy_names %>% 
   ggplot2::ggplot() +
   geom_bar(aes(as.character(stardate_decimal)), fill = "#CC0C00FF") +
   labs(
    title = "Decimals one to three are most frequent and zero the least frequent",
     x = "stardate decimal value"
   ) +
-  theme_dark() +
   theme_solarized_2(light = FALSE)
 ```
 
 # Belay that!
 
 ```{r barplot_facet}
-stardate_tidy_decimal %>% 
+stardate_tidy_names %>% 
   ggplot2::ggplot() +
   geom_bar(
     aes(as.character(stardate_decimal)),
@@ -310,12 +337,6 @@ stardate_tidy_decimal %>%
 * If you actually care about stardates, you can look here: http://trekguide.com/Stardates.htm
 * Mentalfloss simplified guide: http://mentalfloss.com/article/68741/how-do-star-trek-stardates-work
 * List of episodes: https://en.wikipedia.org/wiki/List_of_Star_Trek:_The_Next_Generation_episodes
-
-# Supplemental
-
-```{r}
-sessionInfo()
-```
 
 # Full stop!
 
